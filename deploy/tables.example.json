@@ -1,0 +1,41 @@
+[
+  {
+    "name": "sku",
+    "table_id": "tblReplaceSku",
+    "kind": "sku",
+    "product_values": ["商品", "product"],
+    "shop_values": ["店铺", "shop"],
+    "fields": {
+      "shop": "店铺标识",
+      "id": "SKU记录标识",
+      "scope": "适用范围",
+      "product_ids": "平台商品ID",
+      "enabled": "已启用",
+      "sku": "SKU编码",
+      "model": "型号",
+      "answer": "商品说明",
+      "source": "来源链接"
+    }
+  },
+  {
+    "name": "answers",
+    "table_id": "tblReplaceAnswers",
+    "kind": "answer",
+    "product_values": ["商品", "product"],
+    "shop_values": ["店铺", "shop"],
+    "fields": {
+      "shop": "店铺标识",
+      "id": "原始问答标识",
+      "scope": "适用范围",
+      "product_ids": "平台商品ID",
+      "enabled": "已启用",
+      "sku": "SKU编码",
+      "model": "型号",
+      "question": "原始问题",
+      "answer": "原始答案",
+      "question_override": "人工问题",
+      "answer_override": "人工答案",
+      "source": "来源链接"
+    }
+  }
+]

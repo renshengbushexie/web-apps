@@ -1,0 +1,23 @@
+[Unit]
+Description=Rust customer knowledge query API
+After=network.target
+
+[Service]
+Type=simple
+User=rust-knowledge
+Group=rust-knowledge
+WorkingDirectory=/var/lib/rust-knowledge
+EnvironmentFile=/etc/rust-knowledge/api.env
+ExecStart=/opt/rust-knowledge/current/kb-api
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/rust-knowledge
+
+[Install]
+WantedBy=multi-user.target

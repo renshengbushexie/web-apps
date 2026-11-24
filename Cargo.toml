@@ -1,0 +1,42 @@
+[package]
+name = "rust-knowledge"
+version = "0.1.0"
+edition = "2024"
+default-run = "kb-api"
+
+[[bin]]
+name = "kb-api"
+path = "src/main.rs"
+
+[[bin]]
+name = "kb-sync"
+path = "src/bin/kb-sync.rs"
+
+[dependencies]
+anyhow = "1"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+base64 = "0.22"
+subtle = "2.6"
+arc-swap = "1.9"
+im = "15"
+tempfile = "3"
+async-stream = "0.3"
+axum = "0.8"
+csv = "1"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tantivy = { version = "0.27", default-features = false, features = ["mmap", "lz4-compression"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time", "signal"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

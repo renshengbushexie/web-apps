@@ -1,0 +1,661 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rust 客服知识库 API",
+    "version": "0.1.0",
+    "description": "查询由店铺密钥确定身份。客户端在受信任的业务后端使用密钥，公网通过 HTTPS 反向代理访问。服务没有读写飞书或晓多的即时查询调用。"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8080",
+      "description": "本机开发；公网集成时替换为实际 HTTPS 域名"
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "health",
+        "summary": "获取进程状态与已发布版本",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sku": {
+      "get": {
+        "operationId": "lookupSku",
+        "summary": "精确查询当前商品 SKU 或机型",
+        "description": "sku、model 均省略时返回最多 100 条已启用卡片；两者同时提供时必须同时匹配。未命中返回 200 和空数组。",
+        "security": [
+          {
+            "ShopBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProductId"
+          },
+          {
+            "name": "sku",
+            "in": "query",
+            "description": "SKU 原文。省略或空串表示不限。",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "最多 256 UTF-8 字节。",
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "description": "适用机型。省略或空串表示不限。",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "最多 256 UTF-8 字节。",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Matches"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Bad"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "operationId": "searchAnswers",
+        "summary": "检索本商品及本店通用的有效话术",
+        "security": [
+          {
+            "ShopBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ProductId"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "搜索词或客服问句。",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/QueryText"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "最大返回条数。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 5
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Matches"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Bad"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/compare": {
+      "post": {
+        "operationId": "compareProducts",
+        "summary": "用已授权商品资料发起 AI 流式比较",
+        "security": [
+          {
+            "ShopBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Comparison"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "服务器发送事件流，事件依次为 sources、零个或多个 delta、done。流中途失败以 error 结束；此时 HTTP 状态仍为 200。",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "event: sources\ndata: {\"version\":7,\"products\":[{\"product_id\":\"001\",\"records\":[{\"id\":\"sku:001\",\"sku\":\"A0\",\"model\":\"Example 0\",\"question\":\"\",\"answer\":\"支持无线充电\",\"source\":\"商品规格表\"}],\"more_cards\":false},{\"product_id\":\"002\",\"records\":[{\"id\":\"sku:002\",\"sku\":\"A1\",\"model\":\"Example 1\",\"question\":\"\",\"answer\":\"支持无线充电\",\"source\":\"商品规格表\"}],\"more_cards\":false}]}\n\nevent: delta\ndata: {\"text\":\"两款都支持无线充电。\"}\n\nevent: done\ndata: {\"version\":7}\n\n"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Bad"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/Unsupported"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooMany"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/admin/changes": {
+      "post": {
+        "operationId": "publishChanges",
+        "summary": "内部同步发布一批新增、更新或删除",
+        "description": "一批事务发布。内容一致的重复请求不提升知识版本。",
+        "security": [
+          {
+            "AdminBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Batch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Bad"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/Unsupported"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ShopBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "店铺业务后端持有的自选密钥，原值通过 Authorization 请求头发送。"
+      },
+      "AdminBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "仅供内部同步服务使用的 KB_ADMIN_TOKEN，与所有店铺密钥独立。"
+      }
+    },
+    "parameters": {
+      "ProductId": {
+        "name": "product_id",
+        "in": "query",
+        "description": "当前会话的商品 ID。保留原始字符串和前导零。",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/QueryText"
+        }
+      }
+    },
+    "schemas": {
+      "Version": {
+        "type": "integer",
+        "format": "int64",
+        "minimum": 0
+      },
+      "VersionResult": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/Version"
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version"
+          }
+        },
+        "required": [
+          "status",
+          "version"
+        ]
+      },
+      "QueryText": {
+        "type": "string",
+        "description": "1 至 256 UTF-8 字节；不得有首尾空白或控制字符。",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "RecordId": {
+        "type": "string",
+        "description": "1 至 2048 UTF-8 字节；保留前导零。",
+        "minLength": 1,
+        "maxLength": 2048
+      },
+      "Match": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "记录标识"
+          },
+          "sku": {
+            "type": "string",
+            "description": "SKU 原文，可为空"
+          },
+          "model": {
+            "type": "string",
+            "description": "适用机型，可为空"
+          },
+          "question": {
+            "type": "string",
+            "description": "问题原文，可为空"
+          },
+          "answer": {
+            "type": "string",
+            "description": "已发布答案或参数，可为空"
+          },
+          "source": {
+            "type": "string",
+            "description": "运营发布的出处文字或链接，可为空"
+          }
+        },
+        "required": [
+          "id",
+          "sku",
+          "model",
+          "question",
+          "answer",
+          "source"
+        ]
+      },
+      "Matches": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Match"
+            }
+          }
+        },
+        "required": [
+          "version",
+          "items"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "稳定的机器错误码"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Comparison": {
+        "type": "object",
+        "properties": {
+          "left_product_id": {
+            "$ref": "#/components/schemas/QueryText"
+          },
+          "right_product_id": {
+            "$ref": "#/components/schemas/QueryText"
+          },
+          "question": {
+            "$ref": "#/components/schemas/QueryText"
+          }
+        },
+        "required": [
+          "left_product_id",
+          "right_product_id",
+          "question"
+        ],
+        "additionalProperties": false,
+        "description": "两个商品 ID 须不同。请求体最大 8192 字节。"
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "shop": {
+            "$ref": "#/components/schemas/RecordId"
+          },
+          "id": {
+            "$ref": "#/components/schemas/RecordId"
+          },
+          "kind": {
+            "enum": [
+              "sku",
+              "answer"
+            ],
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "product",
+              "shop"
+            ],
+            "type": "string"
+          },
+          "product_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordId"
+            },
+            "default": []
+          },
+          "sku": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "shop",
+          "id",
+          "kind",
+          "scope",
+          "enabled"
+        ],
+        "description": "product 范围必须至少有一个商品 ID。shop 范围只用于 answer，且 product_ids 必须为空。缺省文本字段按空串处理。"
+      },
+      "Change": {
+        "type": "object",
+        "properties": {
+          "shop": {
+            "$ref": "#/components/schemas/RecordId"
+          },
+          "id": {
+            "$ref": "#/components/schemas/RecordId"
+          },
+          "item": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Item"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "更新时身份须等于外层 shop、id；显式 null 表示删除。"
+          }
+        },
+        "required": [
+          "shop",
+          "id",
+          "item"
+        ]
+      },
+      "Batch": {
+        "type": "object",
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            },
+            "maxItems": 50000
+          }
+        },
+        "required": [
+          "changes"
+        ],
+        "additionalProperties": false,
+        "description": "一个请求最多 32 MiB。一个批次内相同 (shop,id) 以最后一次变更为准。"
+      }
+    },
+    "responses": {
+      "Bad": {
+        "description": "参数或 JSON 无效。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "text/plain": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "缺少凭据、凭据错误或密钥类型与操作不符。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "服务繁忙，或可选的 AI 服务未启用。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Internal": {
+        "description": "内部错误。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "某款商品没有可访问的已启用 SKU 资料。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "读取时已发布新版本，重新发起请求。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "请求体或批次数量超出限制。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "text/plain": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Unsupported": {
+        "description": "需使用 Content-Type: application/json。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "text/plain": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Invalid": {
+        "description": "无法解析字段或变更未能发布。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          },
+          "text/plain": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TooMany": {
+        "description": "AI 当前并发已满。",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}
