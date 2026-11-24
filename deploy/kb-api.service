@@ -8,6 +8,7 @@ User=rust-knowledge
 Group=rust-knowledge
 WorkingDirectory=/var/lib/rust-knowledge
 EnvironmentFile=/etc/rust-knowledge/api.env
+EnvironmentFile=-/etc/rust-knowledge/feishu-web.env
 ExecStart=/opt/rust-knowledge/current/kb-api
 Restart=on-failure
 RestartSec=3

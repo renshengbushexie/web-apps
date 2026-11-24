@@ -1,12 +1,39 @@
-# 客服应用接入
+# 个人网页登录与客服应用接入
 
-客服工作台向自己的业务后端发起查询。业务后端验证客服的登录身份、店铺和商品访问权限，再用对应店铺的密钥请求知识库。店铺由密钥确定，查询 URL 中的商品 ID 使用字符串，保留所有前导零。将 [OpenAPI 3.1 文件](./openapi.json) 导入 Apifox、Postman 或其他客户端，可查看字段及响应。
+网页客服和后端应用使用不同的凭据。个人打开站点首页，通过飞书授权后，`/me/*` 按本人权限实时读取飞书。应用后端可使用店铺密钥访问 `/v1/*` 已发布的本机索引。个人网页读取的耗时包含飞书的响应时间。将 [OpenAPI 3.1 文件](./openapi.json) 导入 Apifox、Postman 或其他客户端，可查看接口字段。
 
-## 地址与鉴权
+## 配置个人网页版
 
-开发机默认地址为 `http://127.0.0.1:8080`。跨机器调用使用实际部署的 HTTPS 地址。每个业务请求都携带 `Authorization: Bearer <店铺密钥原值>`。同一店铺密钥可读取该店铺授权发布的所有商品和通用话术，应留在业务后端。浏览器通过登录会话访问业务后端。当前版本的个人权限、审计和离职撤权由业务后端处理。
+1. 管理员准备飞书网页应用，配置应用的**用户身份**权限 `bitable:app:readonly`，发布并将应用开放给需要登录的客服。客服本人还需要有目标知识表的访问权限。要编辑某条记录，需要飞书授予本人相应的编辑权限。
+2. 在飞书开放平台将 HTTPS 回调地址登记为 `https://kb.example.com/auth/feishu/callback`，替换为实际站点域名。反向代理将首页、`/auth/*` 与 `/me/*` 转发给 API。OAuth 回调的查询参数含一次性授权码，代理日志应省略该路由的查询串。
+3. 在 API 服务的受保护环境设置下列变量。原生安装使用 `/etc/rust-knowledge/feishu-web.env`，由 root 管理，权限设为 `0600`。重启 API 后在浏览器访问同一 HTTPS 域名。应用密钥由管理员在服务端维护。
 
-只有 `GET /healthz` 允许匿名，用于读取 `{"status":"ok","version":0}` 等健康结果。后台预部署时只配置独立的 `KB_ADMIN_TOKEN` 即可启动，所有业务查询都会收到 HTTP 401，直到运维录入首个店铺密钥。管理员密钥仅用于内部发布接口。
+| API 服务变量 | 内容 |
+| --- | --- |
+| `FEISHU_WEB_APP_ID` | 飞书网页应用的 App ID |
+| `FEISHU_WEB_APP_SECRET` | 同一应用的 App Secret |
+| `KB_PUBLIC_ORIGIN` | 网站的 HTTPS 源，例如 `https://kb.example.com`；仅包含协议、域名及可选端口 |
+| `FEISHU_BASE_TOKEN` | 实际运营知识库的 Base app_token，指向允许浏览的主库 |
+| `FEISHU_BASE_ORIGIN` | 可选，知识库所属租户的 HTTPS 源，如 `https://your-tenant.feishu.cn`。配置正确后，记录会附上该租户的飞书原表链接。 |
+
+个人登录使用飞书官方授权页、一次性 `state` 与 PKCE S256。浏览器仅持有 `Secure`、`HttpOnly` 的站点会话 Cookie。服务把短期用户令牌保存在内存中，会话有效期最多两小时，且提前于该令牌过期。服务重启、会话到期或飞书撤权后，客服需重新授权。应用注册及协议详见[飞书授权说明](https://open.feishu.cn/document/uAjLw4CM/uYjL24iN/mobile-app)和[获取用户令牌](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/authentication-management/access-token/get-user-access-token-v3)。
+
+| 用户操作 | 浏览器接口 |
+| --- | --- |
+| 登录或退出 | `GET /auth/feishu/login` 转到飞书，飞书回调 `GET /auth/feishu/callback`。在本站通过 `POST /auth/logout` 退出。 |
+| 查看表 | `GET /me/tables` 返回当前用户可见的 `SKU明细`、`商品QA`、`晓多商品知识` 表；以返回的 `table_id` 为准。 |
+| 选择筛选字段 | `GET /me/fields?table_id=...` 返回可展示的字段名称、类型和支持的筛选运算符。 |
+| 查看或筛选记录 | `GET /me/records?table_id=...`；按需传字段名 `field`、对应 `value`、`op`。默认每页 10，最多 25，可用返回的 `next_page_token` 发起下一页。 |
+
+用本人账号打开记录的 `source` 链接即可在飞书原表查看、编辑。租户源缺失或无效时，`source` 为 `null`，仍可浏览记录。编辑权限由飞书原表及行、列级授权决定。业务系统使用本机索引时，新结果还要等待飞书同步发布。个人入口返回 401 时重新登录，返回 403 时由知识库管理员核对本人可见范围和应用的用户身份权限。
+
+## 后端应用的地址与鉴权
+
+业务后端先验证客服的登录身份、店铺和商品访问权限，再使用对应店铺密钥。查询商品 ID 使用字符串，保留前导零。
+
+开发机默认地址为 `http://127.0.0.1:8080`。跨机器调用使用实际部署的 HTTPS 地址。每个业务请求都携带 `Authorization: Bearer <店铺密钥原值>`。同一店铺密钥可读取该店铺授权发布的所有商品和通用话术，应留在业务后端。接入该接口的业务系统负责其客服的登录、权限、审计和离职撤权。
+
+`GET /healthz` 允许匿名，用于读取 `{"status":"ok","version":0}` 等健康结果。后台预部署时只配置独立的 `KB_ADMIN_TOKEN` 即可启动；店铺密钥为空时，店铺查询会收到 HTTP 401。管理员密钥仅用于内部发布接口。
 
 **运维可只保存店铺密钥的 SHA-256 摘要。** 在可信终端用以下 Bash 命令输入自行指定的密钥并计算摘要。使用随机生成的高强度密钥有助于保护生产环境。
 

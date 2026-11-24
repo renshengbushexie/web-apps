@@ -21,11 +21,14 @@ curl --silent --output /dev/null --write-out '%{http_code}\n' \
 | `/opt/rust-knowledge/releases/<完整提交号>/` | 只读发行文件，运行账户为无登录权限的 `rust-knowledge` 系统用户 |
 | `/opt/rust-knowledge/current` | 指向当前发行目录的符号链接 |
 | `/etc/rust-knowledge/api.env` | 仅 root 可读的 API 配置；首次安装设置 `KB_BIND=127.0.0.1:8022` |
+| `/etc/rust-knowledge/feishu-web.env` | 个人飞书登录的应用凭据、站点源和原表标识，由 root 保存为 0600，详见[网页授权配置](api.md)。 |
 | `/etc/rust-knowledge/sync.env` | 开通同步时单独创建，只供后台同步服务使用 |
 | `/var/lib/rust-knowledge/knowledge.sqlite3` | 知识正文、商品关联和发布版本 |
 | `/var/lib/rust-knowledge/sync.sqlite3` | 建议的同步检查点路径，需在 `sync.env` 中设置 |
 
 ## HTTPS 与店铺接入
+
+发布包含个人工作台的版本时，在同一 HTTPS 虚拟主机中加载随包的 `nginx-locations.conf`，检查 `nginx -t` 并重载配置。首页、样式、登录回调和个人查询需要同时转发。匿名打开首页应返回 200，读取 `/me/tables` 应返回 401。
 
 将现有 HTTPS 入口的 API 路由转发到 `http://127.0.0.1:8022`，保持原有证书管理方式。只将客服应用需要的 `/v1/sku`、`/v1/search`、可选 `/v1/compare` 提供给受信任的业务后端。让 `/v1/admin/changes` 仅走本机或受控管理网络。AI 比较使用 SSE，上游代理需要支持长连接并关闭该路由的响应缓冲。
 

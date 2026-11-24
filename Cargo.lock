@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "rust-knowledge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "anyhow",
@@ -1489,6 +1489,7 @@ dependencies = [
  "cbc",
  "csv",
  "futures-util",
+ "getrandom 0.3.4",
  "im",
  "reqwest",
  "rusqlite",

@@ -1,5 +1,6 @@
 mod engine;
 mod http;
+mod personal;
 
 use std::{env, path::Path, sync::Arc};
 
@@ -16,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let database = env::var("KB_DB").unwrap_or_else(|_| "knowledge.sqlite3".into());
     let bind = env::var("KB_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
     let engine = Arc::new(engine::Engine::open(Path::new(&database))?);
-    let app = http::router(engine, credentials, ai);
+    let app = http::router(engine, credentials, ai).merge(personal::router()?);
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
         .context("bind knowledge API")?;

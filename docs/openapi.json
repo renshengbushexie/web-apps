@@ -2,16 +2,767 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rust 客服知识库 API",
-    "version": "0.1.0",
-    "description": "查询由店铺密钥确定身份。客户端在受信任的业务后端使用密钥，公网通过 HTTPS 反向代理访问。服务没有读写飞书或晓多的即时查询调用。"
+    "version": "0.2.0",
+    "description": "个人网页以每位访客自己的飞书身份实时读取知识表。业务后端用店铺密钥查询本机已发布索引。管理员使用独立密钥向内部接口发布数据。"
   },
   "servers": [
+    {
+      "url": "https://kb.example.com",
+      "description": "示例域名。集成时替换为实际部署的 HTTPS 源，个人网页登录需要 HTTPS。"
+    },
     {
       "url": "http://127.0.0.1:8080",
       "description": "本机开发；公网集成时替换为实际 HTTPS 域名"
     }
   ],
   "paths": {
+    "/": {
+      "get": {
+        "operationId": "home",
+        "summary": "打开个人工作台或登录页",
+        "security": [
+          {},
+          {
+            "PersonalSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "登录说明或当前用户的工作台。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "访客须登录或重新取得飞书授权。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "飞书拒绝此用户或应用访问。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "目标知识表不可用。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "飞书限流。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "飞书读取失败。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "尚未配置目标知识库。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "飞书请求超时。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "table",
+            "description": "可见知识表 ID。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "by",
+            "description": "筛选方式，格式为 运算符:字段名，与 value 配合使用。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "value",
+            "description": "筛选值。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "description": "工作台下一页游标。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/auth/feishu/login": {
+      "get": {
+        "operationId": "startPersonalLogin",
+        "summary": "在当前浏览器发起飞书授权",
+        "security": [],
+        "responses": {
+          "303": {
+            "description": "跳转到飞书授权页，并写入与该浏览器绑定的临时 Cookie。",
+            "headers": {
+              "Location": {
+                "description": "浏览器跳转地址。",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Set-Cookie": {
+                "description": "浏览器接收或清除 Secure、HttpOnly、SameSite=Lax 的站点 Cookie。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "登录请求过多。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "网页登录不可用。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/feishu/callback": {
+      "get": {
+        "operationId": "finishPersonalLogin",
+        "summary": "处理飞书授权回调",
+        "security": [
+          {
+            "PendingLogin": []
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "签发个人会话并跳回本站首页 /。",
+            "headers": {
+              "Location": {
+                "description": "浏览器跳转地址。",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Set-Cookie": {
+                "description": "浏览器接收或清除 Secure、HttpOnly、SameSite=Lax 的站点 Cookie。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "回调无效、已过期或与浏览器不匹配。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "授权已取消。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "登录服务繁忙。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "与飞书交换令牌失败。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "个人登录不可用。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "description": "飞书原样返回的一次性 state。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "description": "用户允许时由飞书提供的一次性授权码。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "description": "用户拒绝时由飞书提供的错误。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "endPersonalSession",
+        "summary": "退出本站个人会话",
+        "security": [
+          {},
+          {
+            "PersonalSession": []
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "清除站点登录和授权流程 Cookie，并返回 /。",
+            "headers": {
+              "Location": {
+                "description": "浏览器跳转地址。",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Set-Cookie": {
+                "description": "浏览器接收或清除 Secure、HttpOnly、SameSite=Lax 的站点 Cookie。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origin 缺少或与本站不匹配。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "个人登录不可用。",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Origin",
+            "description": "浏览器传送的本站 HTTPS 源，应与 KB_PUBLIC_ORIGIN 相同。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/me/tables": {
+      "get": {
+        "operationId": "listPersonalTables",
+        "summary": "列出本人可见的知识表",
+        "security": [
+          {
+            "PersonalSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "仅返回本人当前可见的数据。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tables": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PersonalTable"
+                      }
+                    }
+                  },
+                  "required": [
+                    "tables"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "访客须登录或重新取得飞书授权。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "飞书拒绝此用户或应用访问。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "飞书限流。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "飞书读取失败。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "尚未配置目标知识库。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "飞书请求超时。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/fields": {
+      "get": {
+        "operationId": "listPersonalFields",
+        "summary": "获取本人可见的表字段和筛选运算符",
+        "security": [
+          {
+            "PersonalSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "仅返回本人当前可见的数据。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PersonalField"
+                      }
+                    }
+                  },
+                  "required": [
+                    "fields"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "访客须登录或重新取得飞书授权。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "飞书拒绝此用户或应用访问。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "目标知识表不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "飞书限流。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "飞书读取失败。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "尚未配置目标知识库。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "飞书请求超时。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "table_id",
+            "description": "从 /me/tables 取得目标表 ID。",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ]
+      }
+    },
+    "/me/records": {
+      "get": {
+        "operationId": "listPersonalRecords",
+        "summary": "浏览或按一个字段筛选当前用户可见的飞书记录",
+        "security": [
+          {
+            "PersonalSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "仅返回本人当前可见的数据。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalRecordPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "访客须登录或重新取得飞书授权。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "飞书拒绝此用户或应用访问。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "目标知识表不可用。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "飞书限流。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "飞书读取失败。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "尚未配置目标知识库。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "飞书请求超时。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "table_id",
+            "description": "从 /me/tables 取得目标表 ID。",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "in": "query",
+            "name": "field",
+            "description": "筛选字段的完整名称，与 value 同时指定。最多 1024 UTF-8 字节。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "value",
+            "description": "筛选值，与 field 同时指定。最多 2048 UTF-8 字节。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "op",
+            "description": "仅用于筛选，根据 /me/fields 的 operators 选择，默认精确匹配。",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "is",
+                "contains"
+              ],
+              "default": "is"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "每页最多返回多少条记录。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 25,
+              "default": 10
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "上一页返回的非空 next_page_token。最多 2048 UTF-8 字节。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/healthz": {
       "get": {
         "operationId": "health",
@@ -286,6 +1037,18 @@
         "type": "http",
         "scheme": "bearer",
         "description": "仅供内部同步服务使用的 KB_ADMIN_TOKEN，与所有店铺密钥独立。"
+      },
+      "PersonalSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-kb_session",
+        "description": "个人网页短期会话，由本站 OAuth 回调签发。使用同源浏览器，飞书令牌保存在服务端内存。"
+      },
+      "PendingLogin": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-kb_oauth",
+        "description": "登录开始时签发，绑定本次登录的浏览器与一次性 state。"
       }
     },
     "parameters": {
@@ -533,6 +1296,104 @@
         ],
         "additionalProperties": false,
         "description": "一个请求最多 32 MiB。一个批次内相同 (shop,id) 以最后一次变更为准。"
+      },
+      "PersonalTable": {
+        "type": "object",
+        "properties": {
+          "table_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "table_id",
+          "name"
+        ]
+      },
+      "PersonalField": {
+        "type": "object",
+        "properties": {
+          "field_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "integer"
+          },
+          "operators": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "is",
+                "contains"
+              ]
+            }
+          }
+        },
+        "required": [
+          "field_id",
+          "name",
+          "type",
+          "operators"
+        ]
+      },
+      "PersonalRecord": {
+        "type": "object",
+        "properties": {
+          "record_id": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "每个键是本次返回的可见字段名，值是用于展示的文本。"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "配置有效的 FEISHU_BASE_ORIGIN 后返回飞书原记录链接，由飞书依本人权限控制编辑。未配置有效租户源时为 null。"
+          }
+        },
+        "required": [
+          "record_id",
+          "fields",
+          "source"
+        ]
+      },
+      "PersonalRecordPage": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PersonalRecord"
+            }
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_page_token": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "records",
+          "has_more",
+          "next_page_token"
+        ]
       }
     },
     "responses": {
