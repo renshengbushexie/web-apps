@@ -14,6 +14,10 @@ use std::sync::Arc;
 
 pub fn router() -> anyhow::Result<Router> {
     let auth = Arc::new(auth::Auth::from_env()?);
+    with_auth(auth)
+}
+
+fn with_auth(auth: Arc<auth::Auth>) -> anyhow::Result<Router> {
     let api = knowledge::router(auth.clone())?;
     Ok(Router::new()
         .route("/", get(page::home))
@@ -36,12 +40,13 @@ pub fn router() -> anyhow::Result<Router> {
 
 async fn protect(req: Request, next: Next) -> Response {
     // A same-origin form POST needs its Origin for logout validation.
-    let referrer = if req.uri().path() == "/" {
+    let home = req.uri().path() == "/";
+    let mut res = next.run(req).await;
+    let referrer = if home && res.status() == axum::http::StatusCode::OK {
         "same-origin"
     } else {
         "no-referrer"
     };
-    let mut res = next.run(req).await;
     for (name, value) in [
         (header::CACHE_CONTROL, "private, no-store"),
         (header::REFERRER_POLICY, referrer),

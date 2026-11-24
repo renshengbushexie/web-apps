@@ -106,7 +106,7 @@ fn deployed() -> Option<&'static Source> {
         })
         .as_ref()
 }
-fn tenant_origin(raw: &str) -> Option<String> {
+pub(super) fn tenant_origin(raw: &str) -> Option<String> {
     let authority = raw.strip_prefix("https://")?;
     let host = authority
         .strip_suffix('/')
@@ -188,7 +188,7 @@ async fn private_response(req: Request<Body>, next: Next) -> Response {
     );
     res
 }
-fn safe_id(id: &str) -> bool {
+pub(super) fn safe_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 fn safe_value(s: &str, limit: usize) -> bool {

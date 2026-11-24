@@ -49,16 +49,22 @@ struct Page<T> {
     page_token: Option<String>,
     total: Option<usize>,
 }
+pub fn base_token() -> Result<String> {
+    let base = crate::required("FEISHU_BASE_TOKEN")?;
+    ensure!(
+        base.bytes().all(|b| b.is_ascii_alphanumeric()),
+        "invalid FEISHU_BASE_TOKEN"
+    );
+    Ok(base)
+}
+pub fn source_key(base: &str, table: &Table) -> String {
+    format!("{}/{}", base, table.table_id)
+}
 impl Feishu {
     pub fn new(client: Client) -> Result<Self> {
-        let base = crate::required("FEISHU_BASE_TOKEN")?;
-        ensure!(
-            base.bytes().all(|b| b.is_ascii_alphanumeric()),
-            "invalid FEISHU_BASE_TOKEN"
-        );
         Ok(Self {
             client,
-            base,
+            base: base_token()?,
             app_id: crate::required("FEISHU_APP_ID")?,
             secret: crate::required("FEISHU_APP_SECRET")?,
             origin: "https://open.feishu.cn/open-apis".into(),
@@ -86,7 +92,7 @@ impl Feishu {
         )
     }
     pub fn source_key(&self, table: &Table) -> String {
-        format!("{}/{}", self.base, table.table_id)
+        source_key(&self.base, table)
     }
     fn list<T: DeserializeOwned>(
         &self,

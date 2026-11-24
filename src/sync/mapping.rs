@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub type Snapshot = BTreeMap<(String, String), Value>;
+pub type Keys = BTreeSet<(String, String)>;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Table {
@@ -13,6 +14,8 @@ pub struct Table {
     pub fields: Fields,
     #[serde(default = "enabled_values")]
     pub enabled_values: Vec<String>,
+    #[serde(default = "disabled_values")]
+    pub disabled_values: Vec<String>,
     #[serde(default = "product_values")]
     pub product_values: Vec<String>,
     #[serde(default = "shop_values")]
@@ -25,6 +28,11 @@ fn enabled_values() -> Vec<String> {
 }
 fn product_values() -> Vec<String> {
     ["product", "商品"].map(str::to_owned).into()
+}
+fn disabled_values() -> Vec<String> {
+    ["disabled", "false", "停用", "已停用", "未启用"]
+        .map(str::to_owned)
+        .into()
 }
 fn shop_values() -> Vec<String> {
     ["shop", "店铺"].map(str::to_owned).into()
@@ -109,7 +117,11 @@ pub fn validate_tables(tables: &[Table]) -> Result<()> {
                     .iter()
                     .chain(&t.shop_values)
                     .chain(&t.enabled_values)
+                    .chain(&t.disabled_values)
                     .all(|v| !v.trim().is_empty())
+                && t.enabled_values
+                    .iter()
+                    .all(|v| !t.disabled_values.contains(v))
                 && t.product_values.iter().all(|v| !t.shop_values.contains(v)),
             "invalid scope/status labels"
         );
@@ -209,59 +221,74 @@ pub fn snapshot(table: &Table, base: &str, records: &[Record]) -> Result<Snapsho
             "duplicate (shop, stable source ID) in {}",
             table.name
         );
-        let get = |k: &Option<String>| text(k.as_ref().and_then(|s| r.fields.get(s)));
-        let status = r.fields.get(&f.enabled);
-        let enabled = match status {
-            Some(Value::Bool(b)) => *b,
-            _ => text(status).is_ok_and(|s| table.enabled_values.contains(&s)),
-        };
-        if !enabled {
-            continue;
-        }
-        let scope = text(r.fields.get(&f.scope)).unwrap_or_default();
-        let scope = if table.product_values.contains(&scope) {
-            "product"
-        } else if table.shop_values.contains(&scope) {
-            "shop"
-        } else {
-            continue;
-        };
-        let product_ids = product_ids(r.fields.get(&f.product_ids))?;
-        if (scope == "product" && product_ids.is_empty())
-            || (scope == "shop" && (!product_ids.is_empty() || table.kind == "sku"))
-        {
-            continue;
-        }
-        let field_text = |raw: &Option<String>, over: &Option<String>| -> Result<String> {
-            let edited = get(over)?;
-            if edited.trim().is_empty() {
-                get(raw)
-            } else {
-                Ok(edited)
-            }
-        };
-        let sku = get(&f.sku)?;
-        let question = field_text(&f.question, &f.question_override)?;
-        let answer = field_text(&f.answer, &f.answer_override)?;
-        if table.kind == "answer" && (question.trim().is_empty() || answer.trim().is_empty()) {
-            continue;
-        }
-        let src = f.source.as_ref().and_then(|n| r.fields.get(n));
-        let source = match src.and_then(|v| v.get("link")).and_then(Value::as_str) {
-            Some(url) => url.to_owned(),
-            None => text(src)?,
-        };
-        let source = if source.is_empty() {
+        let link = || {
             format!(
                 "https://www.feishu.cn/base/{base}?table={}&record={}",
                 table.table_id, r.record_id
             )
-        } else {
-            source
         };
-        let item = json!({"shop": key.0,"id":key.1,"kind":table.kind,"scope":scope,"product_ids":product_ids,
-            "sku":sku,"model":get(&f.model)?,"question":question,"answer":answer,"source":source,"enabled":true});
-        result.insert(key, item);
+        if let Some(item) = mapped_item(table, r, &key, link)? {
+            result.insert(key, item);
+        }
     }
     Ok(result)
+}
+
+pub fn mapped_item(
+    table: &Table,
+    r: &Record,
+    key: &(String, String),
+    fallback: impl FnOnce() -> String,
+) -> Result<Option<Value>> {
+    let f = &table.fields;
+    let get = |k: &Option<String>| text(k.as_ref().and_then(|s| r.fields.get(s)));
+    let status = r.fields.get(&f.enabled);
+    let enabled = match status {
+        Some(Value::Bool(b)) => *b,
+        _ => text(status).is_ok_and(|s| table.enabled_values.contains(&s)),
+    };
+    if !enabled {
+        return Ok(None);
+    }
+    let scope = text(r.fields.get(&f.scope)).unwrap_or_default();
+    let scope = if table.product_values.contains(&scope) {
+        "product"
+    } else if table.shop_values.contains(&scope) {
+        "shop"
+    } else {
+        return Ok(None);
+    };
+    let product_ids = product_ids(r.fields.get(&f.product_ids))?;
+    if (scope == "product" && product_ids.is_empty())
+        || (scope == "shop" && (!product_ids.is_empty() || table.kind == "sku"))
+    {
+        return Ok(None);
+    }
+    let field_text = |raw: &Option<String>, over: &Option<String>| -> Result<String> {
+        let edited = get(over)?;
+        if edited.trim().is_empty() {
+            get(raw)
+        } else {
+            Ok(edited)
+        }
+    };
+    let sku = get(&f.sku)?;
+    let question = field_text(&f.question, &f.question_override)?;
+    let answer = field_text(&f.answer, &f.answer_override)?;
+    if table.kind == "answer" && (question.trim().is_empty() || answer.trim().is_empty()) {
+        return Ok(None);
+    }
+    let src = f.source.as_ref().and_then(|n| r.fields.get(n));
+    let source = match src.and_then(|v| v.get("link")).and_then(Value::as_str) {
+        Some(url) => url.to_owned(),
+        None => text(src)?,
+    };
+    let source = if source.is_empty() {
+        fallback()
+    } else {
+        source
+    };
+    let item = json!({"shop": key.0,"id":key.1,"kind":table.kind,"scope":scope,"product_ids":product_ids,
+            "sku":sku,"model":get(&f.model)?,"question":question,"answer":answer,"source":source,"enabled":true});
+    Ok(Some(item))
 }

@@ -1,4 +1,7 @@
-use crate::{feishu::json_response, mapping::Snapshot};
+use crate::{
+    feishu::json_response,
+    mapping::{Keys, Snapshot},
+};
 use anyhow::{Context, Result, ensure};
 use reqwest::{Url, blocking::Client};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -80,6 +83,22 @@ impl State {
         Ok(())
     }
     pub fn stage(&mut self, source: &str, current: &Snapshot) -> Result<usize> {
+        self.stage_changes(source, current, None)
+    }
+    pub fn stage_csv(
+        &mut self,
+        source: &str,
+        current: &Snapshot,
+        disabled: &Keys,
+    ) -> Result<usize> {
+        self.stage_changes(source, current, Some(disabled))
+    }
+    fn stage_changes(
+        &mut self,
+        source: &str,
+        current: &Snapshot,
+        disabled: Option<&Keys>,
+    ) -> Result<usize> {
         let tx = self.db.transaction()?;
         let count: i64 = tx.query_row(
             "SELECT COUNT(*) FROM sync_pending WHERE source=?1",
@@ -126,6 +145,18 @@ impl State {
                     + usize::from(changes > 0);
                 add.execute(params![source, shop, id, body])?;
                 changes += 1;
+            }
+            if let Some(keys) = disabled {
+                for (shop, id) in keys {
+                    let other: Option<String> = owner
+                        .query_row(params![shop, id], |r| r.get(0))
+                        .optional()?;
+                    ensure!(
+                        other.as_deref().is_none_or(|s| s == source),
+                        "(shop, stable ID) already owned by another table"
+                    );
+                }
+                prior.retain(|key, _| keys.contains(key));
             }
             for (shop, id) in prior.keys() {
                 bytes += serde_json::to_vec(&json!({"shop":shop,"id":id,"item":null}))?.len()
@@ -207,6 +238,33 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn partial_exports_keep_unseen_keys_and_reject_foreign_deletions() {
+        let mut s = State::open(Path::new(":memory:")).unwrap();
+        let key = |id: &str| ("shop".to_owned(), id.to_owned());
+        let original = Snapshot::from([(key("unseen"), json!(1)), (key("off"), json!(2))]);
+        s.stage("a", &original).unwrap();
+        s.acknowledge("a").unwrap();
+        s.stage("b", &Snapshot::from([(key("foreign"), json!(3))]))
+            .unwrap();
+        let added = Snapshot::from([(key("new"), json!(4))]);
+        assert!(
+            s.stage_csv("a", &added, &Keys::from([key("foreign")]))
+                .is_err()
+        );
+        assert!(s.pending("a").unwrap().is_empty());
+        s.acknowledge("b").unwrap();
+        assert!(
+            s.stage_csv("a", &added, &Keys::from([key("foreign")]))
+                .is_err()
+        );
+        let disabled = Keys::from([key("off"), key("never-owned")]);
+        assert_eq!(s.stage_csv("a", &added, &disabled).unwrap(), 2);
+        s.acknowledge("a").unwrap();
+        assert_eq!(s.stage_csv("a", &added, &disabled).unwrap(), 0);
+        let expected = Snapshot::from([(key("unseen"), json!(1)), (key("new"), json!(4))]);
+        assert_eq!(s.stage("a", &expected).unwrap(), 0);
+    }
     #[test]
     fn pending_survives_restart_and_tombstones_are_limited_to_the_owner() {
         let path =

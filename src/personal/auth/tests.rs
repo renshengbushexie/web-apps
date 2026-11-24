@@ -174,11 +174,11 @@ async fn missing_app_configuration_is_discoverable_and_preserves_service() {
     let auth = Auth::configure("".into(), "".into(), "https://kb.example.test".into()).unwrap();
     assert!(!auth.enabled());
     assert!(auth.token(&HeaderMap::new()).is_none());
+    let response = login(State(Arc::new(auth)), HeaderMap::new()).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(
-        login(State(Arc::new(auth)), HeaderMap::new())
-            .await
-            .status(),
-        StatusCode::SERVICE_UNAVAILABLE
+        response.headers()[header::LOCATION],
+        "https://feishu.cn/drive/home/"
     );
     assert!(Auth::configure("app".into(), "".into(), "https://kb.example.test".into()).is_err());
     for url in [
@@ -189,6 +189,84 @@ async fn missing_app_configuration_is_discoverable_and_preserves_service() {
     ] {
         assert!(Auth::configure("id".into(), "secret".into(), url.into()).is_err());
     }
+}
+
+async fn get_web(auth: Arc<Auth>, uri: &str) -> Response {
+    let app = super::super::with_auth(auth).unwrap();
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    app.oneshot(req).await.unwrap()
+}
+
+#[tokio::test]
+async fn native_home_and_private_bookmarks_have_separate_destinations() {
+    let auth = Auth::configure(String::new(), String::new(), String::new())
+        .unwrap()
+        .with_native(Some("https://fixture.feishu.cn/"), Some("ExampleBase"));
+    let auth = Arc::new(auth);
+    let landing = get_web(auth.clone(), "/").await;
+    assert_eq!(landing.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(landing.into_body(), 16_384)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert!(body.contains("用飞书扫码登录"));
+    assert!(!body.contains("ExampleBase") && !body.contains("/base/"));
+
+    for (path, location) in [
+        (
+            "/auth/feishu/login?redirect=https://other.example",
+            "https://fixture.feishu.cn/drive/home/",
+        ),
+        (
+            "/?base=ExampleBase&next=https://other.example",
+            "https://fixture.feishu.cn/base/ExampleBase",
+        ),
+    ] {
+        let res = get_web(auth.clone(), path).await;
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(res.headers()[header::LOCATION], location);
+        assert_eq!(res.headers()[header::REFERRER_POLICY], "no-referrer");
+        assert_eq!(res.headers()[header::CACHE_CONTROL], "private, no-store");
+        assert!(!res.headers().contains_key(header::SET_COOKIE));
+    }
+    for path in [
+        "/?base=examplebase",
+        "/?base=https%3A%2F%2Fother.example",
+        "/?base=",
+    ] {
+        let res = get_web(auth.clone(), path).await;
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        assert_eq!(res.headers()[header::REFERRER_POLICY], "no-referrer");
+        assert!(!res.headers().contains_key(header::LOCATION));
+        let text = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+        assert!(!std::str::from_utf8(&text).unwrap().contains("ExampleBase"));
+    }
+}
+
+#[tokio::test]
+async fn native_bookmarks_require_valid_config_and_preserve_optional_oauth() {
+    for (origin, base) in [
+        (None, Some("ExampleBase")),
+        (Some("https://fixture.feishu.cn"), None),
+        (
+            Some("https://fixture.feishu.cn.other.example"),
+            Some("ExampleBase"),
+        ),
+        (Some("https://fixture.feishu.cn"), Some("bad/id")),
+    ] {
+        let auth = Auth::configure(String::new(), String::new(), String::new())
+            .unwrap()
+            .with_native(origin, base);
+        let res = get_web(Arc::new(auth), "/?base=ExampleBase").await;
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        assert!(!res.headers().contains_key(header::LOCATION));
+    }
+    let auth =
+        Arc::new(config().with_native(Some("https://fixture.feishu.cn"), Some("ExampleBase")));
+    let res = get_web(auth, "/auth/feishu/login").await;
+    let url = Url::parse(res.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+    assert_eq!(url.host_str(), Some("accounts.feishu.cn"));
+    assert!(res.headers().contains_key(header::SET_COOKIE));
 }
 
 #[tokio::test]

@@ -1,4 +1,5 @@
 mod ai;
+mod catalog;
 pub use ai::AiProvider;
 
 use crate::engine::{Change, Engine, Item};
@@ -99,10 +100,15 @@ pub fn router(engine: Arc<Engine>, credentials: Credentials, ai: Option<AiProvid
         .route("/v1/admin/changes", post(apply))
         .layer(DefaultBodyLimit::max(ADMIN_BYTES))
         .route_layer(middleware::from_fn_with_state(app.clone(), admin_auth));
+    let catalog = Router::new()
+        .route("/v1/admin/catalog/tables", get(catalog::tables))
+        .route("/v1/admin/catalog/rows", get(catalog::rows))
+        .route_layer(middleware::from_fn_with_state(app.clone(), catalog_auth));
     Router::new()
         .route("/healthz", get(health))
         .merge(read)
         .merge(admin)
+        .merge(catalog)
         .layer(middleware::from_fn(|req: Request, next: Next| async move {
             let mut res = next.run(req).await;
             res.headers_mut()
@@ -156,6 +162,13 @@ async fn admin_auth(State(app): State<App>, mut req: Request, next: Next) -> Api
     let permit = app.writer.try_acquire_owned().map_err(|_| BUSY)?;
     // Held through request parsing and publication, even when the HTTP client disconnects mid-write.
     req.extensions_mut().insert(Arc::new(permit));
+    Ok(next.run(req).await)
+}
+
+async fn catalog_auth(State(app): State<App>, req: Request, next: Next) -> ApiResult<Response> {
+    if bearer(req.headers())? != app.credentials.admin {
+        return Err(UNAUTHORIZED);
+    }
     Ok(next.run(req).await)
 }
 

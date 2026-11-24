@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rust 客服知识库 API",
-    "version": "0.2.0",
-    "description": "个人网页以每位访客自己的飞书身份实时读取知识表。业务后端用店铺密钥查询本机已发布索引。管理员使用独立密钥向内部接口发布数据。"
+    "version": "0.2.1",
+    "description": "默认扫码入口打开飞书原表，原表访问权限由飞书决定。配置网页授权后另可按个人会话实时读取知识表。业务后端用店铺密钥查询本机已发布索引。"
   },
   "servers": [
     {
@@ -19,7 +19,7 @@
     "/": {
       "get": {
         "operationId": "home",
-        "summary": "打开个人工作台或登录页",
+        "summary": "打开个人工作台或用团队书签进入原表",
         "security": [
           {},
           {
@@ -35,6 +35,12 @@
                   "type": "string"
                 }
               }
+            }
+          },
+          "303": {
+            "description": "与服务器配置匹配的团队书签跳转至飞书原表。",
+            "headers": {
+              "Location": { "schema": { "type": "string", "format": "uri" } }
             }
           },
           "400": {
@@ -121,6 +127,13 @@
         "parameters": [
           {
             "in": "query",
+            "name": "base",
+            "description": "团队书签中的原表标识，适用于原生扫码入口。",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "in": "query",
             "name": "table",
             "description": "可见知识表 ID。",
             "required": false,
@@ -158,14 +171,36 @@
         ]
       }
     },
+    "/v1/admin/catalog/tables": {
+      "get": {
+        "operationId": "listSourceTables",
+        "summary": "内部查询全量来源表、列名和记录数",
+        "security": [{"AdminBearer": []}],
+        "responses": {"200": {"description": "表清单。"}, "401": {"description": "缺少管理员鉴权。"}, "503": {"description": "目录尚待部署。"}}
+      }
+    },
+    "/v1/admin/catalog/rows": {
+      "get": {
+        "operationId": "readSourceRows",
+        "summary": "内部按表、关键词或游标读取原始知识记录",
+        "security": [{"AdminBearer": []}],
+        "parameters": [
+          {"name":"table","in":"query","schema":{"type":"string"}},
+          {"name":"q","in":"query","schema":{"type":"string"}},
+          {"name":"after","in":"query","schema":{"type":"integer","minimum":0}},
+          {"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":25,"default":10}}
+        ],
+        "responses": {"200": {"description": "包含来源、原始值、停用标记和分页游标的结果。"}, "400": {"description":"筛选条件无效。"}, "401": {"description":"缺少管理员鉴权。"}, "503":{"description":"目录尚待部署。"}}
+      }
+    },
     "/auth/feishu/login": {
       "get": {
         "operationId": "startPersonalLogin",
-        "summary": "在当前浏览器发起飞书授权",
+        "summary": "进入飞书云文档或已配置的网页授权流程",
         "security": [],
         "responses": {
           "303": {
-            "description": "跳转到飞书授权页，并写入与该浏览器绑定的临时 Cookie。",
+            "description": "默认进入飞书原生云文档；启用站内 OAuth 时进入授权页并设置浏览器临时 Cookie。",
             "headers": {
               "Location": {
                 "description": "浏览器跳转地址。",

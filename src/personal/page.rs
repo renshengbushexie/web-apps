@@ -2,7 +2,7 @@ use super::{auth::Auth, knowledge};
 use axum::{
     extract::{Query, State, rejection::QueryRejection},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
 };
 use reqwest::Url;
 use serde::Deserialize;
@@ -11,6 +11,7 @@ use std::{fmt::Write, sync::Arc};
 
 #[derive(Default, Deserialize)]
 pub(super) struct Filters {
+    base: Option<String>,
     table: Option<String>,
     by: Option<String>,
     value: Option<String>,
@@ -47,7 +48,7 @@ fn landing(enabled: bool) -> Html<String> {
     let action = if enabled {
         r#"<a class="button" href="/auth/feishu/login">用飞书账号登录</a>"#
     } else {
-        r#"<div class="notice"><strong>工作台登录待启用</strong><p>企业应用管理员配置飞书登录后，即可在这里查询。已有原表链接的同事可直接在飞书打开。</p></div>"#
+        r#"<a class="button" href="/auth/feishu/login">用飞书扫码登录</a><p>登录后，在云文档的「与我共享」中打开知识库。使用团队书签可直达原表。</p>"#
     };
     document(
         &format!(
@@ -87,12 +88,18 @@ pub(super) async fn home(
     headers: HeaderMap,
     q: Result<Query<Filters>, QueryRejection>,
 ) -> Response {
+    let Ok(Query(q)) = q else {
+        return error(StatusCode::BAD_REQUEST, false);
+    };
+    if let Some(base) = q.base.as_deref() {
+        return match auth.native_bookmark(base) {
+            Some(url) => Redirect::to(&url).into_response(),
+            None => (StatusCode::NOT_FOUND, "此知识库书签不可用。").into_response(),
+        };
+    }
     if auth.token(&headers).is_none() {
         return landing(auth.enabled()).into_response();
     }
-    let Ok(Query(q)) = q else {
-        return error(StatusCode::BAD_REQUEST, true);
-    };
     let value = q.value.as_deref().map(str::trim).filter(|v| !v.is_empty());
     let (op, field) = if value.is_some() {
         let Some((op, field)) = q.by.as_deref().and_then(|s| s.split_once(':')) else {

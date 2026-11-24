@@ -5,7 +5,7 @@
 ## 准备飞书数据
 
 1. 在同一个飞书多维表格中准备 SKU 表和问答表，也可以只配置其中一张。取得多维表格的 `app_token` 和每张数据表的 `table_id`。如果拿到的是知识库页面链接，先确认它所指向的多维表格与实际 Base 令牌。[飞书多维表格元数据](https://open.feishu.cn/document/server-docs/docs/bitable-v1/app/get)
-2. 使用飞书企业自建应用，为同步开通字段列表和记录列表的读取权限，并令该应用可以读取配置表里的全部目标记录与列。执行晓多导入的应用另外需要问答表的新增、更新记录权限。高级权限可以单独限制行和列。[飞书多维表格接口及权限](https://open.feishu.cn/document/agile-project-cycle-management-based-on-bitable/introduction)
+2. 使用飞书 API 持续同步时，为企业自建应用开通字段列表和记录列表的读取权限，并令该应用可以读取配置表里的全部目标记录与列。使用下文的飞书 CSV 文件导入时，只需要操作人有飞书导出权限。执行晓多导入的应用另外需要问答表的新增、更新记录权限。高级权限可以单独限制行和列。[飞书多维表格接口及权限](https://open.feishu.cn/document/agile-project-cycle-management-based-on-bitable/introduction)
 3. 复制 [字段映射示例](../deploy/tables.example.json)，替换两处 `table_id`，将 `fields` 中的中文值改成表中的实际列名。配置中出现的每一列都必须存在。没有使用的可选列可以从映射中删去。晓多导入时使用 `name` 指定目标表。
 
 | 映射键 | 飞书字段与填写方式 |
@@ -28,8 +28,9 @@
 
 | 环境变量 | 用途 |
 | --- | --- |
-| `FEISHU_APP_ID`、`FEISHU_APP_SECRET` | 自建应用 ID 和密钥，用于取得租户访问令牌。 |
+| `FEISHU_APP_ID`、`FEISHU_APP_SECRET` | 在线读取和写入飞书时用于取得租户访问令牌。飞书 CSV 导入省略这两项。 |
 | `FEISHU_BASE_TOKEN` | 配置表所属的多维表格 `app_token`。 |
+| `FEISHU_BASE_ORIGIN` | 飞书 CSV 导入时的可选租户网址，例如 `https://团队域名.feishu.cn`（以实际 ASCII 域名替换）。来源列为空时，用该地址生成指向原表的链接。 |
 | `KB_TABLES_JSON` | JSON 数组的**内容**。每张表一项，示例见上文。 |
 | `KB_ADMIN_TOKEN` | 与 `kb-api` 一致的管理令牌。单独导入文件到飞书时不需要。 |
 | `KB_API_URL` | 知识服务根地址，默认 `http://127.0.0.1:8080`。支持 HTTPS 和回环地址 HTTP。同步器自行添加管理接口路径。 |
@@ -67,6 +68,23 @@ cargo build --release --locked --bin kb-sync
 3. 在测试表改动一条已启用的记录，检查飞书事件投递日志、同步器的发布条数和店铺查询结果。响应 HTTP 200 表示接收器已经处理通知；数据在后续完整扫描成功时发布。
 
 验证请求按飞书协议返回 challenge。普通事件要通过 Verification Token 和应用 ID 检查；启用加密时还会校验原始请求体签名、检查签名时间戳（前后 5 分钟）和解密 AES-256-CBC 数据。将同步主机时间与可靠时钟对齐。仅配置的 Base 和数据表的记录变更会唤醒同步。接收器不直接使用事件中的业务字段更新知识库，最近 4,096 个事件 ID 用于过滤重投，短时间内的多次修改合并为一次全量核对。单次请求体上限为 256 KiB，超限或漏投的事件由后续定时核对补齐。[飞书验签及解密说明](https://open.feishu.cn/document/event-subscription-guide/callback-subscription/receive-and-handle-callbacks)
+
+## 从飞书导出的 CSV 发布知识
+
+此命令适用于首次发布和后续手动更新，可以在没有飞书自建应用时使用。它只调用已配置知识服务的管理接口。用有下载权限的账号打开目标表，点击右上角「··· → 导出 → Excel/CSV 文件」，选择 CSV。选择「当前数据表的全部数据」可导出该账号可见的全部行。选择筛选视图可只更新指定记录；导出时须包含配置映射中的全部列。多张表请分别导出并按各自的映射名执行。[飞书导出说明](https://www.feishu.cn/hc/zh-CN/articles/360049067854-导出或导入多维表格)
+
+```powershell
+$env:KB_TABLES_JSON = Get-Content -Raw -Encoding utf8 .\deploy\tables.local.json
+.\target\release\kb-sync.exe import-feishu sku .\SKU明细.csv
+.\target\release\kb-sync.exe import-feishu answers .\商品QA.csv
+```
+
+部署端提供 `FEISHU_BASE_TOKEN`、真实的表 ID 和字段映射、`KB_ADMIN_TOKEN`。若与在线同步共用数据，使用同一 `KB_API_URL` 和持久的 `KB_SYNC_DB`。店铺查询令牌可在发布后单独配置。
+
+- 每个文件限 64 MiB，采用 UTF-8（可带 BOM）和逗号分隔，首行列名与映射精确匹配。程序按文本读取店铺、稳定记录标识和商品 ID，包括前导零。避免用电子表格软件重新保存已按数字转换的 ID。多个商品 ID 用 JSON 字符串数组填写；原导出若把多选值合并为其他文本分隔形式，需先按原始商品标识整理成数组。
+- 文件中的启用项按 `(shop,id)` 更新；未出现在本次导出中的已有知识继续保留。明确撤下时，导出该记录并将状态填为 `false`、`FALSE`、`disabled`、`停用`、`已停用` 或 `未启用`。可在表映射中用 `disabled_values` 指定实际停用标签，对应的启用标签由 `enabled_values` 设置；复选框大写 `TRUE/FALSE` 在配置认可对应小写值时也能识别。状态空白、状态陌生、同一键重复、启用记录的范围或问答不完整时，整份文件报错。只含列名的文件保留全部已发布记录。
+- 原始记录链接可放入映射的来源列。没有原始链接时，已配置 `FEISHU_BASE_ORIGIN` 的导入使用对应租户的数据表链接，否则来源留空。导入不会根据业务 ID 创建飞书记录链接。
+- 本地文件导入按行合并。飞书中直接删除行后，下一份 CSV 不会携带该行；需要保留稳定键并明确标为停用，或通过具有完整权限的应用进行在线全量核对。遇到网络错误，保留同一份文件及状态库重试。
 
 ## 从晓多导入
 

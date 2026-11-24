@@ -62,17 +62,38 @@ impl Records {
 
 pub(super) struct Auth {
     config: Option<Config>,
+    native_origin: Option<String>,
+    native_base: Option<String>,
     records: Mutex<Records>,
     exchange_slots: Semaphore,
 }
 
 impl Auth {
     pub(super) fn from_env() -> Result<Self> {
-        Self::configure(
+        let auth = Self::configure(
             env::var("FEISHU_WEB_APP_ID").unwrap_or_default(),
             env::var("FEISHU_WEB_APP_SECRET").unwrap_or_default(),
             env::var("KB_PUBLIC_ORIGIN").unwrap_or_default(),
-        )
+        )?;
+        Ok(auth.with_native(
+            env::var("FEISHU_BASE_ORIGIN").ok().as_deref(),
+            env::var("FEISHU_BASE_TOKEN").ok().as_deref(),
+        ))
+    }
+
+    fn with_native(mut self, origin: Option<&str>, base: Option<&str>) -> Self {
+        self.native_origin = origin.and_then(super::knowledge::tenant_origin);
+        self.native_base = base
+            .filter(|v| super::knowledge::safe_id(v))
+            .map(str::to_owned);
+        self
+    }
+
+    pub(super) fn native_bookmark(&self, supplied: &str) -> Option<String> {
+        let origin = self.native_origin.as_deref()?;
+        let base = self.native_base.as_deref()?;
+        bool::from(base.as_bytes().ct_eq(supplied.as_bytes()))
+            .then(|| format!("{origin}/base/{base}"))
     }
 
     fn configure(app_id: String, secret: String, origin: String) -> Result<Self> {
@@ -112,6 +133,8 @@ impl Auth {
         };
         Ok(Self {
             config,
+            native_origin: None,
+            native_base: None,
             records: Mutex::new(Records::default()),
             exchange_slots: Semaphore::new(16),
         })
@@ -196,7 +219,8 @@ fn home() -> Response {
 
 pub(super) async fn login(State(auth): State<Arc<Auth>>, headers: HeaderMap) -> Response {
     let Some(cfg) = &auth.config else {
-        return response(StatusCode::SERVICE_UNAVAILABLE, "飞书网页登录尚未配置。");
+        let origin = auth.native_origin.as_deref().unwrap_or("https://feishu.cn");
+        return axum::response::Redirect::to(&format!("{origin}/drive/home/")).into_response();
     };
     let (Ok(flow), Ok(state), Ok(verifier)) = (random_id(), random_id(), random_id()) else {
         return response(StatusCode::SERVICE_UNAVAILABLE, "暂时无法开始登录。");

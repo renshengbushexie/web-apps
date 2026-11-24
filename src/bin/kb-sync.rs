@@ -1,5 +1,7 @@
 #[path = "../sync/events.rs"]
 mod events;
+#[path = "../sync/export.rs"]
+mod export;
 #[path = "../sync/feishu.rs"]
 mod feishu;
 #[path = "../sync/import.rs"]
@@ -58,11 +60,12 @@ fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() || args == ["--help"] || args == ["-h"] {
         println!(
-            "kb-sync once | watch | import-xiaoduo <table-name> <file.csv|file.jsonl>\nSet FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_BASE_TOKEN, KB_TABLES_JSON and KB_SYNC_DB. Synchronization also uses KB_API_URL, KB_ADMIN_TOKEN and optionally KB_POLL_SECONDS (default 60)."
+            "kb-sync once | watch | import-xiaoduo <table-name> <file.csv|file.jsonl> | import-feishu <table-name> <file.csv>\nSet FEISHU_BASE_TOKEN and KB_TABLES_JSON. import-feishu uses KB_ADMIN_TOKEN and optional FEISHU_BASE_ORIGIN without Feishu app credentials. Other modes need FEISHU_APP_ID and FEISHU_APP_SECRET. Synchronization uses KB_ADMIN_TOKEN and optionally KB_API_URL, KB_SYNC_DB and KB_POLL_SECONDS (default 60)."
         );
         return Ok(());
     }
-    let importing = matches!(args.as_slice(), [cmd, _, _] if cmd == "import-xiaoduo");
+    let importing =
+        matches!(args.as_slice(), [cmd, _, _] if cmd == "import-xiaoduo" || cmd == "import-feishu");
     ensure!(
         importing || args == ["once"] || args == ["watch"],
         "invalid arguments (try --help)"
@@ -75,7 +78,6 @@ fn main() -> Result<()> {
         .timeout(Duration::from_secs(35))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let feishu = Feishu::new(client.clone())?;
     let path =
         PathBuf::from(env::var_os("KB_SYNC_DB").unwrap_or_else(|| "data/kb-sync.sqlite3".into()));
     if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -97,8 +99,12 @@ fn main() -> Result<()> {
             .iter()
             .find(|t| t.name == args[1])
             .context("unknown table name")?;
-        return import::run(&feishu, table, &args[2], &state);
+        if args[0] == "import-feishu" {
+            return export::run(table, &args[2], &mut state, &state::Admin::new(client)?);
+        }
+        return import::run(&Feishu::new(client)?, table, &args[2], &state);
     }
+    let feishu = Feishu::new(client.clone())?;
     let api = state::Admin::new(client)?;
     let seconds = env::var("KB_POLL_SECONDS")
         .unwrap_or_else(|_| "60".into())
